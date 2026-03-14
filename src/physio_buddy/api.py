@@ -62,6 +62,14 @@ _meralion = MeralionClient(
 )
 _ALLOWED_AUDIO_TYPES = {"audio/wav", "audio/mpeg", "audio/flac", "audio/mp4"}
 _MAX_AUDIO_BYTES = 100 * 1024 * 1024
+_pose_analyzer: MediaPipePoseAnalyzer | None = None
+
+
+def _get_pose_analyzer() -> MediaPipePoseAnalyzer:
+    global _pose_analyzer
+    if _pose_analyzer is None:
+        _pose_analyzer = MediaPipePoseAnalyzer()
+    return _pose_analyzer
 
 
 def _resolve_frame_metrics(payload: IngestPayload) -> FrameMetrics:
@@ -77,7 +85,7 @@ def _resolve_frame_metrics(payload: IngestPayload) -> FrameMetrics:
         )
 
     if payload.image_base64:
-        analyzer = MediaPipePoseAnalyzer()
+        analyzer = _get_pose_analyzer()
         angles = analyzer.from_image_base64(payload.image_base64)
         return FrameMetrics(
             knee_angle_deg=angles.knee_angle_deg,
@@ -92,6 +100,19 @@ def _require_meralion() -> None:
     if not _meralion.enabled:
         raise HTTPException(status_code=503, detail="MERALION_API_KEY is not configured")
 
+
+def _empty_report(session_id: str) -> SessionReport:
+    return SessionReport(
+        session_id=session_id,
+        total_reps=0,
+        valid_reps=0,
+        shallow_rep_count=0,
+        knee_warning_count=0,
+        torso_warning_count=0,
+        fatigue_timeline=[],
+        notable_events=["Session ended before any valid frames were processed."],
+        recommendation="Start the live loop and ensure camera framing captures full-body squat movement.",
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -135,6 +156,7 @@ def index() -> str:
       <div class="row">
         <span class="metric">Rep count: <strong id="repCount">0</strong></span>
         <span class="metric">Fatigue: <strong id="fatigue">n/a</strong></span>
+        <span class="metric">Fatigue signs: <strong id="fatigueSigns">0</strong></span>
         <span class="metric">Voice intent: <strong id="intent">none</strong></span>
       </div>
       <p><strong>Coach:</strong> <span id="coachMsg">Waiting...</span></p>
@@ -157,6 +179,9 @@ def index() -> str:
     let previousTick = performance.now();
     let live = false;
     let latestIntent = 'none';
+    let speechRecognizer = null;
+    let speechSynthesisEnabled = 'speechSynthesis' in window;
+    let lastSpokenMessage = '';
 
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
@@ -195,6 +220,9 @@ ${JSON.stringify(obj, null, 2)}` : msg;
       source.connect(analyser);
 
       setupSpeechRecognition();
+      if (!speechSynthesisEnabled) {
+        log('SpeechSynthesis API unavailable. Audio coaching playback disabled.');
+      }
       statusEl.textContent = 'Media enabled';
       document.getElementById('startSession').disabled = false;
       log('Camera/mic enabled.');
@@ -210,6 +238,25 @@ ${JSON.stringify(obj, null, 2)}` : msg;
       return Math.max(0, Math.min(1, rms * 8));
     }
 
+    function estimateVisualFatigue(frameMetrics) {
+      let signs = 0;
+      if (frameMetrics.torso_lean_deg > 32) signs += 1;
+      if (frameMetrics.knee_angle_deg > 138) signs += 1; // repeatedly shallow reps
+      if (frameMetrics.knee_inward_offset < -0.10) signs += 1;
+      return signs;
+    }
+
+    function speakCoachMessage(message) {
+      if (!speechSynthesisEnabled || !message || message === lastSpokenMessage) return;
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(message);
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+      utterance.volume = 1.0;
+      window.speechSynthesis.speak(utterance);
+      lastSpokenMessage = message;
+    }
+
     function captureBase64Frame() {
       const ctx = canvas.getContext('2d');
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -222,7 +269,8 @@ ${JSON.stringify(obj, null, 2)}` : msg;
         log('SpeechRecognition API unavailable in this browser. Voice intent will stay "none".');
         return;
       }
-      const recognizer = new SR();
+      speechRecognizer = new SR();
+      const recognizer = speechRecognizer;
       recognizer.lang = 'en-US';
       recognizer.continuous = true;
       recognizer.interimResults = true;
@@ -237,7 +285,7 @@ ${JSON.stringify(obj, null, 2)}` : msg;
         document.getElementById('intent').textContent = latestIntent;
       };
       recognizer.onerror = (e) => log('Speech recognition error', e.error);
-      recognizer.onend = () => { if (mediaStream) recognizer.start(); };
+      recognizer.onend = () => { if (mediaStream && live) recognizer.start(); };
       recognizer.start();
     }
 
@@ -273,6 +321,13 @@ ${JSON.stringify(obj, null, 2)}` : msg;
         document.getElementById('repCount').textContent = event.rep_count;
         document.getElementById('fatigue').textContent = event.fatigue_level;
         document.getElementById('coachMsg').textContent = event.coaching_message;
+        const fatigueSigns = estimateVisualFatigue(event.frame);
+        document.getElementById('fatigueSigns').textContent = String(fatigueSigns);
+        if (event.fatigue_level === 'HIGH' || fatigueSigns >= 2) {
+          speakCoachMessage('Fatigue signs detected. Please pause and recover for thirty seconds.');
+        } else {
+          speakCoachMessage(event.coaching_message);
+        }
         statusEl.textContent = 'Live coaching running';
       } catch (err) {
         statusEl.textContent = 'Ingest error';
@@ -287,6 +342,7 @@ ${JSON.stringify(obj, null, 2)}` : msg;
       document.getElementById('startLive').disabled = true;
       document.getElementById('stopLive').disabled = false;
       loopHandle = setInterval(liveTick, 1200);
+      if (speechRecognizer) { try { speechRecognizer.start(); } catch (e) {} }
       statusEl.textContent = 'Starting live loop...';
     }
 
@@ -296,6 +352,8 @@ ${JSON.stringify(obj, null, 2)}` : msg;
       loopHandle = null;
       document.getElementById('startLive').disabled = false;
       document.getElementById('stopLive').disabled = true;
+      if (speechRecognizer) speechRecognizer.stop();
+      if (speechSynthesisEnabled) window.speechSynthesis.cancel();
       statusEl.textContent = 'Live loop stopped';
     }
 
@@ -351,7 +409,12 @@ def ingest(session_id: str, payload: IngestPayload) -> Event:
     rep_tracker = _rep_trackers[session_id]
     fatigue_estimator = _fatigue_estimators[session_id]
 
-    frame = _resolve_frame_metrics(payload)
+    try:
+        frame = _resolve_frame_metrics(payload)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=f"MediaPipe unavailable: {exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Pose extraction failed: {exc}") from exc
     phase = rep_tracker.update(frame.knee_angle_deg)
     form = assess_form(
         knee_angle_deg=frame.knee_angle_deg,
@@ -496,7 +559,11 @@ def summary(session_id: str) -> SessionReport:
 
 @app.post("/sessions/{session_id}/stop", response_model=SessionReport)
 def stop(session_id: str) -> SessionReport:
-    report = summary(session_id)
+    if session_id not in _rep_trackers:
+        raise HTTPException(status_code=404, detail="Unknown session_id")
+
+    events = _store.get_events(session_id)
+    report = build_summary(session_id=session_id, events=events) if events else _empty_report(session_id)
     _rep_trackers.pop(session_id, None)
     _fatigue_estimators.pop(session_id, None)
     _store.clear(session_id)

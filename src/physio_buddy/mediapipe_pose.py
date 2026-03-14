@@ -23,10 +23,20 @@ class MediaPipePoseAnalyzer:
             import mediapipe as mp  # type: ignore
         except ImportError as exc:
             raise RuntimeError(
-                "mediapipe is required for pose analysis. Install with `pip install mediapipe`."
+                "mediapipe is required for pose analysis. Install with `pip install -e .[vision]` or `pip install mediapipe opencv-python`."
             ) from exc
+
+        solutions = getattr(mp, "solutions", None)
+        pose_module = getattr(solutions, "pose", None) if solutions else None
+        pose_cls = getattr(pose_module, "Pose", None) if pose_module else None
+        if pose_cls is None:
+            raise RuntimeError(
+                "Installed mediapipe package does not expose the Solutions Pose API. "
+                "Reinstall with a standard wheel, for example `pip install --upgrade mediapipe`."
+            )
+
         self._mp = mp
-        self._pose = mp.solutions.pose.Pose(
+        self._pose = pose_cls(
             static_image_mode=False,
             model_complexity=1,
             min_detection_confidence=0.5,

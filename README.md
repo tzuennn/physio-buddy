@@ -45,3 +45,23 @@ Set environment variables:
 
 ## Safety
 The system is assistive and non-diagnostic.
+
+
+## Troubleshooting
+### MediaPipe Pose runtime errors
+If `/sessions/{id}/ingest` returns a MediaPipe error like:
+
+- `Installed mediapipe package does not expose the Solutions Pose API`
+
+then your Python environment likely has an incompatible package variant. This backend uses the **Python Solutions Pose API** (`mediapipe.solutions.pose`), not the JS Tasks packages.
+
+Fix with:
+
+```bash
+pip uninstall -y mediapipe mediapipe-silicon
+pip install --upgrade mediapipe opencv-python
+# or install this project with vision extras
+pip install -e .[vision]
+```
+
+For browser-only projects, MediaPipe Tasks JS packages such as `@mediapipe/tasks-vision` are valid, but they do not replace Python `mediapipe` for this FastAPI backend.
