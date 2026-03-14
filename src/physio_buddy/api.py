@@ -101,6 +101,19 @@ def _require_meralion() -> None:
         raise HTTPException(status_code=503, detail="MERALION_API_KEY is not configured")
 
 
+def _empty_report(session_id: str) -> SessionReport:
+    return SessionReport(
+        session_id=session_id,
+        total_reps=0,
+        valid_reps=0,
+        shallow_rep_count=0,
+        knee_warning_count=0,
+        torso_warning_count=0,
+        fatigue_timeline=[],
+        notable_events=["Session ended before any valid frames were processed."],
+        recommendation="Start the live loop and ensure camera framing captures full-body squat movement.",
+    )
+
 
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
@@ -546,7 +559,11 @@ def summary(session_id: str) -> SessionReport:
 
 @app.post("/sessions/{session_id}/stop", response_model=SessionReport)
 def stop(session_id: str) -> SessionReport:
-    report = summary(session_id)
+    if session_id not in _rep_trackers:
+        raise HTTPException(status_code=404, detail="Unknown session_id")
+
+    events = _store.get_events(session_id)
+    report = build_summary(session_id=session_id, events=events) if events else _empty_report(session_id)
     _rep_trackers.pop(session_id, None)
     _fatigue_estimators.pop(session_id, None)
     _store.clear(session_id)

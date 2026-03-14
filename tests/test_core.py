@@ -227,3 +227,39 @@ def test_homepage_contains_live_controls() -> None:
     assert response.status_code == 200
     assert 'Enable Camera & Mic' in response.text
     assert 'Start Live Coaching' in response.text
+
+
+def test_stop_without_events_returns_empty_report() -> None:
+    client = TestClient(app)
+    start = client.post('/sessions/start')
+    session_id = start.json()['session_id']
+
+    response = client.post(f'/sessions/{session_id}/stop')
+    assert response.status_code == 200
+    body = response.json()
+    assert body['total_reps'] == 0
+    assert body['valid_reps'] == 0
+    assert 'before any valid frames' in body['notable_events'][0]
+
+
+def test_ingest_maps_mediapipe_runtime_error(monkeypatch) -> None:
+    from physio_buddy import api as api_module
+
+    def fail_resolve(_payload):
+        raise RuntimeError('Installed mediapipe package does not expose the Solutions Pose API.')
+
+    monkeypatch.setattr(api_module, '_resolve_frame_metrics', fail_resolve)
+
+    client = TestClient(app)
+    start = client.post('/sessions/start')
+    session_id = start.json()['session_id']
+    payload = {
+        'frame': {'knee_angle_deg': 150, 'torso_lean_deg': 20, 'knee_inward_offset': 0.0},
+        'audio': {'command_intent': 'none', 'strain_score': 0.2, 'confidence': 0.9},
+        'tempo_rps': 1.0,
+        'rest_gap_s': 1.0,
+    }
+
+    response = client.post(f'/sessions/{session_id}/ingest', json=payload)
+    assert response.status_code == 503
+    assert 'MediaPipe unavailable' in response.json()['detail']
