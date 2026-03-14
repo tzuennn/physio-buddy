@@ -105,7 +105,7 @@ def test_ingest_with_landmarks() -> None:
 
 def test_meralion_requires_key() -> None:
     client = TestClient(app)
-    response = client.post("/audio/upload-url", json={"filename": "clip.wav", "content_type": "audio/wav"})
+    response = client.post("/audio/upload-url", json={"filename": "clip.wav", "content_type": "audio/wav", "file_size": 1024})
     assert response.status_code == 503
 
 
@@ -115,12 +115,12 @@ def test_meralion_upload_passthrough(monkeypatch):
     class FakeMeralion:
         enabled = True
 
-        def upload_url(self, filename: str, content_type: str):
+        def upload_url(self, filename: str, content_type: str, file_size: int):
             return {"file_id": "f1", "url": "https://s3.example/upload", "filename": filename, "content_type": content_type}
 
     monkeypatch.setattr(api_module, "_meralion", FakeMeralion())
     client = TestClient(app)
-    response = client.post("/audio/upload-url", json={"filename": "clip.wav", "content_type": "audio/wav"})
+    response = client.post("/audio/upload-url", json={"filename": "clip.wav", "content_type": "audio/wav", "file_size": 1024})
     assert response.status_code == 200
     assert response.json()["file_id"] == "f1"
 
@@ -219,3 +219,11 @@ def test_summary_shallow_rep_count_tracks_reps_not_frames() -> None:
     assert report.total_reps == 2
     assert report.shallow_rep_count == 1
     assert report.valid_reps == 1
+
+
+def test_homepage_contains_live_controls() -> None:
+    client = TestClient(app)
+    response = client.get('/')
+    assert response.status_code == 200
+    assert 'Enable Camera & Mic' in response.text
+    assert 'Start Live Coaching' in response.text

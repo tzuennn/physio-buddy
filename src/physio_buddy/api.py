@@ -5,6 +5,7 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from .coaching import choose_coaching
@@ -90,6 +91,231 @@ def _resolve_frame_metrics(payload: IngestPayload) -> FrameMetrics:
 def _require_meralion() -> None:
     if not _meralion.enabled:
         raise HTTPException(status_code=503, detail="MERALION_API_KEY is not configured")
+
+
+
+@app.get("/", response_class=HTMLResponse)
+def index() -> str:
+    return """
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Physio Buddy Live MVP Demo</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, sans-serif; max-width: 1080px; margin: 1rem auto; padding: 0 1rem; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .card { border: 1px solid #8a8a8a55; border-radius: 10px; padding: .9rem; }
+    button { margin: .25rem .35rem .25rem 0; padding: .45rem .75rem; }
+    video { width: 100%; border-radius: 8px; background: #000; aspect-ratio: 4/3; }
+    pre { max-height: 340px; overflow: auto; border-radius: 8px; padding: .75rem; background: #00000012; }
+    .row { display: flex; gap: .75rem; flex-wrap: wrap; }
+    .metric { font-size: .95rem; padding: .2rem .55rem; border-radius: 999px; border: 1px solid #8a8a8a55; }
+  </style>
+</head>
+<body>
+  <h1>Physio Buddy — Live Webcam + Mic MVP</h1>
+  <p>This page uses your <strong>real camera and microphone</strong> in-browser and streams frame/audio-derived signals to the backend coaching endpoints.</p>
+  <div class="row">
+    <button id="enableMedia">1) Enable Camera & Mic</button>
+    <button id="startSession" disabled>2) Start Session</button>
+    <button id="startLive" disabled>3) Start Live Coaching</button>
+    <button id="stopLive" disabled>Stop Live Coaching</button>
+    <button id="stopSession" disabled>Stop Session + Summary</button>
+  </div>
+
+  <div class="grid">
+    <section class="card">
+      <h3>Live Camera</h3>
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="canvas" width="640" height="480" style="display:none"></canvas>
+      <p>Session ID: <code id="sid">none</code></p>
+      <div class="row">
+        <span class="metric">Rep count: <strong id="repCount">0</strong></span>
+        <span class="metric">Fatigue: <strong id="fatigue">n/a</strong></span>
+        <span class="metric">Voice intent: <strong id="intent">none</strong></span>
+      </div>
+      <p><strong>Coach:</strong> <span id="coachMsg">Waiting...</span></p>
+      <p><strong>Status:</strong> <span id="status">Idle</span></p>
+    </section>
+
+    <section class="card">
+      <h3>Event Log</h3>
+      <pre id="out">Ready.</pre>
+      <p>Useful links: <a href="/docs" target="_blank">Swagger</a> · <a href="/redoc" target="_blank">ReDoc</a> · <a href="/health" target="_blank">Health</a></p>
+    </section>
+  </div>
+
+  <script>
+    let mediaStream = null;
+    let sessionId = null;
+    let loopHandle = null;
+    let audioContext = null;
+    let analyser = null;
+    let previousTick = performance.now();
+    let live = false;
+    let latestIntent = 'none';
+
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const out = document.getElementById('out');
+    const statusEl = document.getElementById('status');
+
+    function log(msg, obj) {
+      const line = obj ? `${msg}
+${JSON.stringify(obj, null, 2)}` : msg;
+      out.textContent = `${new Date().toLocaleTimeString()} ${line}
+
+` + out.textContent;
+    }
+
+    async function api(path, payload) {
+      const response = await fetch(path, {
+        method: payload ? 'POST' : 'GET',
+        headers: payload ? { 'content-type': 'application/json' } : undefined,
+        body: payload ? JSON.stringify(payload) : undefined,
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(`${response.status} ${JSON.stringify(data)}`);
+      }
+      return data;
+    }
+
+    async function enableMedia() {
+      mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      video.srcObject = mediaStream;
+
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const source = audioContext.createMediaStreamSource(mediaStream);
+      analyser = audioContext.createAnalyser();
+      analyser.fftSize = 1024;
+      source.connect(analyser);
+
+      setupSpeechRecognition();
+      statusEl.textContent = 'Media enabled';
+      document.getElementById('startSession').disabled = false;
+      log('Camera/mic enabled.');
+    }
+
+    function getStrainScore() {
+      if (!analyser) return 0.1;
+      const buffer = new Float32Array(analyser.fftSize);
+      analyser.getFloatTimeDomainData(buffer);
+      let sum = 0;
+      for (let i = 0; i < buffer.length; i++) sum += buffer[i] * buffer[i];
+      const rms = Math.sqrt(sum / buffer.length);
+      return Math.max(0, Math.min(1, rms * 8));
+    }
+
+    function captureBase64Frame() {
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL('image/jpeg', 0.72).split(',')[1];
+    }
+
+    function setupSpeechRecognition() {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR) {
+        log('SpeechRecognition API unavailable in this browser. Voice intent will stay "none".');
+        return;
+      }
+      const recognizer = new SR();
+      recognizer.lang = 'en-US';
+      recognizer.continuous = true;
+      recognizer.interimResults = true;
+      recognizer.onresult = (event) => {
+        const text = Array.from(event.results).map(r => r[0].transcript).join(' ').toLowerCase();
+        if (text.includes('pause')) latestIntent = 'pause';
+        else if (text.includes('resume') || text.includes('continue')) latestIntent = 'resume';
+        else if (text.includes('stop')) latestIntent = 'stop';
+        else if (text.includes('start')) latestIntent = 'start';
+        else if (text.includes('reps left')) latestIntent = 'reps-left';
+        else latestIntent = 'none';
+        document.getElementById('intent').textContent = latestIntent;
+      };
+      recognizer.onerror = (e) => log('Speech recognition error', e.error);
+      recognizer.onend = () => { if (mediaStream) recognizer.start(); };
+      recognizer.start();
+    }
+
+    async function startSession() {
+      const start = await api('/sessions/start', {});
+      sessionId = start.session_id;
+      document.getElementById('sid').textContent = sessionId;
+      document.getElementById('startLive').disabled = false;
+      document.getElementById('stopSession').disabled = false;
+      statusEl.textContent = 'Session started';
+      log('Session started', start);
+    }
+
+    async function liveTick() {
+      if (!live || !sessionId) return;
+      const now = performance.now();
+      const dt = (now - previousTick) / 1000;
+      previousTick = now;
+
+      const payload = {
+        image_base64: captureBase64Frame(),
+        audio: {
+          command_intent: latestIntent,
+          strain_score: getStrainScore(),
+          confidence: 0.85,
+        },
+        tempo_rps: 1.0,
+        rest_gap_s: Math.max(0, dt),
+      };
+
+      try {
+        const event = await api(`/sessions/${sessionId}/ingest`, payload);
+        document.getElementById('repCount').textContent = event.rep_count;
+        document.getElementById('fatigue').textContent = event.fatigue_level;
+        document.getElementById('coachMsg').textContent = event.coaching_message;
+        statusEl.textContent = 'Live coaching running';
+      } catch (err) {
+        statusEl.textContent = 'Ingest error';
+        log('Ingest failed. If detail mentions MediaPipe, install vision deps: pip install -e .[vision]', String(err));
+        stopLive();
+      }
+    }
+
+    function startLive() {
+      live = true;
+      previousTick = performance.now();
+      document.getElementById('startLive').disabled = true;
+      document.getElementById('stopLive').disabled = false;
+      loopHandle = setInterval(liveTick, 1200);
+      statusEl.textContent = 'Starting live loop...';
+    }
+
+    function stopLive() {
+      live = false;
+      if (loopHandle) clearInterval(loopHandle);
+      loopHandle = null;
+      document.getElementById('startLive').disabled = false;
+      document.getElementById('stopLive').disabled = true;
+      statusEl.textContent = 'Live loop stopped';
+    }
+
+    async function stopSession() {
+      if (!sessionId) return;
+      stopLive();
+      const report = await api(`/sessions/${sessionId}/stop`, {});
+      statusEl.textContent = 'Session stopped';
+      log('Session summary', report);
+    }
+
+    document.getElementById('enableMedia').onclick = () => enableMedia().catch((e) => log('Media permission failed', String(e)));
+    document.getElementById('startSession').onclick = () => startSession().catch((e) => log('Start session failed', String(e)));
+    document.getElementById('startLive').onclick = () => startLive();
+    document.getElementById('stopLive').onclick = () => stopLive();
+    document.getElementById('stopSession').onclick = () => stopSession().catch((e) => log('Stop session failed', String(e)));
+  </script>
+</body>
+</html>
+"""
 
 
 @app.get("/health")
