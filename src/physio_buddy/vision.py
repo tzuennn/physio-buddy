@@ -17,7 +17,7 @@ class VisionThresholds:
 class RepStateMachine:
     """Simple squat rep state machine for STAND->DESCEND->BOTTOM->ASCEND->STAND."""
 
-    def __init__(self, descend_angle: float = 150.0, bottom_angle: float = 110.0, ascend_angle: float = 135.0) -> None:
+    def __init__(self, descend_angle: float = 155.0, bottom_angle: float = 125.0, ascend_angle: float = 145.0) -> None:
         self.phase = RepPhase.STAND
         self.rep_count = 0
         self._descend_angle = descend_angle
