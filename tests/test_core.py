@@ -123,3 +123,99 @@ def test_meralion_upload_passthrough(monkeypatch):
     response = client.post("/audio/upload-url", json={"filename": "clip.wav", "content_type": "audio/wav"})
     assert response.status_code == 200
     assert response.json()["file_id"] == "f1"
+
+
+def test_summary_valid_reps_not_penalized_when_no_shallow() -> None:
+    from physio_buddy.models import Event, FormAssessment, FrameMetrics, RepPhase
+
+    events = [
+        Event(
+            ts=0.0,
+            frame=FrameMetrics(knee_angle_deg=170, torso_lean_deg=10, knee_inward_offset=0.0),
+            phase=RepPhase.STAND,
+            rep_count=0,
+            form=FormAssessment(depth_quality="good", knee_tracking_warning=False, torso_lean_warning=False),
+            fatigue_level=FatigueLevel.LOW,
+            coaching_message="ok",
+        ),
+        Event(
+            ts=1.0,
+            frame=FrameMetrics(knee_angle_deg=170, torso_lean_deg=10, knee_inward_offset=0.0),
+            phase=RepPhase.STAND,
+            rep_count=1,
+            form=FormAssessment(depth_quality="good", knee_tracking_warning=False, torso_lean_warning=False),
+            fatigue_level=FatigueLevel.LOW,
+            coaching_message="ok",
+        ),
+        Event(
+            ts=2.0,
+            frame=FrameMetrics(knee_angle_deg=170, torso_lean_deg=10, knee_inward_offset=0.0),
+            phase=RepPhase.STAND,
+            rep_count=2,
+            form=FormAssessment(depth_quality="good", knee_tracking_warning=False, torso_lean_warning=False),
+            fatigue_level=FatigueLevel.LOW,
+            coaching_message="ok",
+        ),
+    ]
+
+    report = build_summary("clean", events)
+    assert report.total_reps == 2
+    assert report.shallow_rep_count == 0
+    assert report.valid_reps == 2
+
+
+def test_summary_shallow_rep_count_tracks_reps_not_frames() -> None:
+    from physio_buddy.models import Event, FormAssessment, FrameMetrics, RepPhase
+
+    events = [
+        Event(
+            ts=0.0,
+            frame=FrameMetrics(knee_angle_deg=150, torso_lean_deg=10, knee_inward_offset=0.0),
+            phase=RepPhase.DESCEND,
+            rep_count=0,
+            form=FormAssessment(depth_quality="shallow", knee_tracking_warning=False, torso_lean_warning=False),
+            fatigue_level=FatigueLevel.LOW,
+            coaching_message="depth",
+        ),
+        Event(
+            ts=0.1,
+            frame=FrameMetrics(knee_angle_deg=145, torso_lean_deg=10, knee_inward_offset=0.0),
+            phase=RepPhase.BOTTOM,
+            rep_count=0,
+            form=FormAssessment(depth_quality="shallow", knee_tracking_warning=False, torso_lean_warning=False),
+            fatigue_level=FatigueLevel.LOW,
+            coaching_message="depth",
+        ),
+        Event(
+            ts=0.2,
+            frame=FrameMetrics(knee_angle_deg=160, torso_lean_deg=10, knee_inward_offset=0.0),
+            phase=RepPhase.STAND,
+            rep_count=1,
+            form=FormAssessment(depth_quality="good", knee_tracking_warning=False, torso_lean_warning=False),
+            fatigue_level=FatigueLevel.LOW,
+            coaching_message="ok",
+        ),
+        Event(
+            ts=1.0,
+            frame=FrameMetrics(knee_angle_deg=95, torso_lean_deg=10, knee_inward_offset=0.0),
+            phase=RepPhase.BOTTOM,
+            rep_count=1,
+            form=FormAssessment(depth_quality="good", knee_tracking_warning=False, torso_lean_warning=False),
+            fatigue_level=FatigueLevel.LOW,
+            coaching_message="ok",
+        ),
+        Event(
+            ts=1.2,
+            frame=FrameMetrics(knee_angle_deg=160, torso_lean_deg=10, knee_inward_offset=0.0),
+            phase=RepPhase.STAND,
+            rep_count=2,
+            form=FormAssessment(depth_quality="good", knee_tracking_warning=False, torso_lean_warning=False),
+            fatigue_level=FatigueLevel.LOW,
+            coaching_message="ok",
+        ),
+    ]
+
+    report = build_summary("mixed", events)
+    assert report.total_reps == 2
+    assert report.shallow_rep_count == 1
+    assert report.valid_reps == 1
