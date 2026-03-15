@@ -1,5 +1,5 @@
 """Physio Buddy core package."""
 
-from .api import app
+from .app import app
 
 __all__ = ["app"]
