@@ -7,8 +7,8 @@ from .models import FormAssessment, RepPhase
 
 @dataclass(slots=True)
 class VisionThresholds:
-    depth_good_min: float = 85.0
-    depth_good_max: float = 110.0
+    depth_good_min: float = 90.0
+    depth_good_max: float = 125.0
     depth_shallow_min: float = 120.0
     knee_warning_offset: float = -0.08
     torso_warning_max: float = 35.0
@@ -49,3 +49,41 @@ def assess_form(knee_angle_deg: float, knee_inward_offset: float, torso_lean_deg
         knee_tracking_warning=knee_inward_offset < t.knee_warning_offset,
         torso_lean_warning=torso_lean_deg > t.torso_warning_max,
     )
+
+
+def profile_thresholds(profile: str) -> VisionThresholds:
+    """Return VisionThresholds appropriate for the given PhysioProfile value."""
+    match profile:
+        case "post_op_conservative":
+            # Very shallow squats are perfectly acceptable; deep squats are flagged
+            return VisionThresholds(
+                depth_good_min=135.0, depth_good_max=165.0, depth_shallow_min=158.0,
+                knee_warning_offset=-0.06, torso_warning_max=30.0,
+            )
+        case "knee_rehab":
+            # Moderate depth; knee valgus is the top priority
+            return VisionThresholds(
+                depth_good_min=115.0, depth_good_max=142.0, depth_shallow_min=138.0,
+                knee_warning_offset=-0.06,
+            )
+        case "performance":
+            # Deeper squats accepted; tighter depth window
+            return VisionThresholds(
+                depth_good_min=70.0, depth_good_max=100.0, depth_shallow_min=95.0,
+                torso_warning_max=40.0,
+            )
+        case _:  # general_mobility
+            return VisionThresholds()
+
+
+def profile_state_machine(profile: str) -> RepStateMachine:
+    """Return a RepStateMachine with angle thresholds for the given PhysioProfile value."""
+    match profile:
+        case "post_op_conservative":
+            return RepStateMachine(descend_angle=163.0, bottom_angle=140.0, ascend_angle=158.0)
+        case "knee_rehab":
+            return RepStateMachine(descend_angle=158.0, bottom_angle=130.0, ascend_angle=150.0)
+        case "performance":
+            return RepStateMachine(descend_angle=150.0, bottom_angle=100.0, ascend_angle=138.0)
+        case _:  # general_mobility
+            return RepStateMachine()

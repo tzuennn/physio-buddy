@@ -12,6 +12,13 @@ class FatigueLevel(str, Enum):
     HIGH = "HIGH"
 
 
+class PhysioProfile(str, Enum):
+    POST_OP_CONSERVATIVE = "post_op_conservative"
+    KNEE_REHAB = "knee_rehab"
+    GENERAL_MOBILITY = "general_mobility"
+    PERFORMANCE = "performance"
+
+
 class RepPhase(str, Enum):
     STAND = "STAND"
     DESCEND = "DESCEND"
@@ -43,6 +50,8 @@ class AudioSignal(BaseModel):
     command_intent: Literal["start", "pause", "resume", "stop", "reps-left", "none"] = "none"
     strain_score: float = Field(..., ge=0.0, le=1.0)
     confidence: float = Field(..., ge=0.0, le=1.0)
+    valid: bool | None = None
+    audio_age_ms: int | None = Field(None, ge=0)
 
 
 class Event(BaseModel):
@@ -54,7 +63,12 @@ class Event(BaseModel):
     rep_count: int = Field(..., ge=0)
     form: FormAssessment
     fatigue_level: FatigueLevel
+    fatigue_reason: str | None = None
     coaching_message: str
+    vision_valid: bool = True
+    audio_valid: bool = True
+    vision_age_ms: int = Field(0, ge=0)
+    audio_age_ms: int = Field(0, ge=0)
 
 
 class SessionReport(BaseModel):
