@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from physio_buddy.api import app
+from physio_buddy.app import app
 from physio_buddy.coaching import choose_coaching
 from physio_buddy.fatigue import FatigueEstimator
 from physio_buddy.mediapipe_pose import calculate_angles_from_landmarks
@@ -103,14 +103,20 @@ def test_ingest_with_landmarks() -> None:
     assert body["frame"]["knee_angle_deg"] >= 0
 
 
-def test_meralion_requires_key() -> None:
+def test_meralion_requires_key(monkeypatch) -> None:
+    import physio_buddy.routers.audio as audio_module
+
+    class DisabledMeralion:
+        enabled = False
+
+    monkeypatch.setattr(audio_module, "get_meralion", lambda: DisabledMeralion())
     client = TestClient(app)
     response = client.post("/audio/upload-url", json={"filename": "clip.wav", "content_type": "audio/wav", "file_size": 1024})
     assert response.status_code == 503
 
 
 def test_meralion_upload_passthrough(monkeypatch):
-    from physio_buddy import api as api_module
+    import physio_buddy.routers.audio as audio_module
 
     class FakeMeralion:
         enabled = True
@@ -118,7 +124,7 @@ def test_meralion_upload_passthrough(monkeypatch):
         def upload_url(self, filename: str, content_type: str, file_size: int):
             return {"file_id": "f1", "url": "https://s3.example/upload", "filename": filename, "content_type": content_type}
 
-    monkeypatch.setattr(api_module, "_meralion", FakeMeralion())
+    monkeypatch.setattr(audio_module, "get_meralion", lambda: FakeMeralion())
     client = TestClient(app)
     response = client.post("/audio/upload-url", json={"filename": "clip.wav", "content_type": "audio/wav", "file_size": 1024})
     assert response.status_code == 200
