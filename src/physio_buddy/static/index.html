@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Physio Buddy - Squat Coaching</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="page elderly-friendly">
+      <header>
+        <h1>Physio Buddy</h1>
+        <p class="subtitle">Your AI Squat Coach</p>
+        <div class="status" id="apiStatus">API: checking...</div>
+      </header>
+
+      <!-- Safety and Consent -->
+      <section class="card consent-card">
+        <h2>Before You Start</h2>
+        <p class="safety-notice">
+          This is an assistive tool to help with your squat form. It is not
+          medical advice. Stop if you feel any pain or discomfort.
+        </p>
+        <label class="checkbox-large">
+          <input id="consent" type="checkbox" />
+          <span>I understand and agree to use this tool</span>
+        </label>
+      </section>
+
+      <!-- Physio Mode Profile Selection -->
+      <section class="card profile-card">
+        <h2>Your Physio Mode</h2>
+        <p style="font-size: 0.95rem; color: #555; margin-bottom: 12px">
+          Select the profile that matches your condition. This personalises
+          coaching thresholds and the AI coach's guidance style.
+        </p>
+        <div class="profile-grid" id="profileGrid">
+          <label class="profile-option">
+            <input type="radio" name="profile" value="post_op_conservative" />
+            <span class="profile-label">
+              <strong>🏥 Post-Op Recovery</strong>
+              <small>Very gentle range, maximum caution</small>
+            </span>
+          </label>
+          <label class="profile-option">
+            <input type="radio" name="profile" value="knee_rehab" />
+            <span class="profile-label">
+              <strong>🦵 Knee Rehab</strong>
+              <small>Knee alignment priority, moderate depth</small>
+            </span>
+          </label>
+          <label class="profile-option">
+            <input
+              type="radio"
+              name="profile"
+              value="general_mobility"
+              checked
+            />
+            <span class="profile-label">
+              <strong>🧘 General Mobility</strong>
+              <small>Comfortable pace, pain-free focus</small>
+            </span>
+          </label>
+          <label class="profile-option">
+            <input type="radio" name="profile" value="performance" />
+            <span class="profile-label">
+              <strong>🏋️ Performance</strong>
+              <small>Full depth, tempo and form coaching</small>
+            </span>
+          </label>
+        </div>
+        <div
+          id="profileStatus"
+          style="margin-top: 10px; font-size: 0.88rem; color: #777"
+        ></div>
+      </section>
+
+      <!-- Main tracking interface -->
+      <section class="card tracking-card">
+        <div class="video-section">
+          <div class="video-wrap">
+            <video id="video" playsinline autoplay muted></video>
+            <canvas id="canvas" class="overlay"></canvas>
+            <div
+              class="live-overlay"
+              aria-live="polite"
+              aria-label="Live session stats"
+            >
+              <div class="overlay-chip">
+                <span>Reps</span>
+                <strong id="overlayRepCount">0</strong>
+              </div>
+              <div class="overlay-chip">
+                <span>Fatigue</span>
+                <strong id="overlayFatigue">-</strong>
+              </div>
+            </div>
+          </div>
+          <div id="cameraStatus" class="camera-status">Camera: off</div>
+          <p
+            style="
+              font-size: 0.9rem;
+              color: #666;
+              margin-top: 8px;
+              text-align: center;
+            "
+          >
+            💡 Tips: Stand 1-2 meters from camera. Full body visible. Good
+            lighting. Face sideways.
+          </p>
+        </div>
+
+        <div class="controls-section">
+          <div class="button-group">
+            <button
+              id="startCamera"
+              class="btn-primary"
+              style="font-size: 18px; padding: 15px 30px"
+            >
+              📷 Start Camera
+            </button>
+            <button
+              id="stopCamera"
+              class="btn-secondary"
+              disabled
+              style="font-size: 18px; padding: 15px 30px"
+            >
+              Stop Camera
+            </button>
+          </div>
+
+          <div class="button-group">
+            <button
+              id="startSession"
+              class="btn-primary"
+              disabled
+              style="font-size: 20px; padding: 20px 40px"
+            >
+              ▶ Start Session
+            </button>
+            <button
+              id="stopSession"
+              class="btn-secondary"
+              disabled
+              style="font-size: 20px; padding: 20px 40px"
+            >
+              ⏹ Stop Session
+            </button>
+          </div>
+        </div>
+
+        <!-- Large metrics display -->
+        <div class="metrics-large">
+          <div class="metric-box">
+            <div class="metric-label">Squats Done</div>
+            <div class="metric-value" id="repCount">0</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-label">Form</div>
+            <div class="metric-value" id="form">-</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-label">How You Feel</div>
+            <div class="metric-value" id="fatigue">-</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-label">Current Position</div>
+            <div class="metric-value" id="phase">-</div>
+          </div>
+        </div>
+
+        <!-- Coaching message - large and prominent -->
+        <div class="coaching-box" id="coachMessage">
+          Ready to start. Turn on the camera first.
+        </div>
+
+        <!-- Voice indicator -->
+        <div class="voice-indicator" id="voiceStatus">🎤 Voice: off</div>
+      </section>
+
+      <!-- Session Summary -->
+      <section class="card summary-card">
+        <h2>Session Results</h2>
+        <button id="fetchSummary" class="btn-secondary" disabled>
+          View Summary
+        </button>
+        <div id="summaryOutput" class="summary-output">No session yet.</div>
+      </section>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
