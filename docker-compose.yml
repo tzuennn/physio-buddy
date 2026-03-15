@@ -1,0 +1,18 @@
+services:
+  physio-buddy:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env # copy .env.example → .env and fill in your values
+    volumes:
+      - model-cache:/app/.cache/models # persist the downloaded pose model
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  model-cache:
